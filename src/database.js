@@ -1,9 +1,7 @@
 const mongoose = require('mongoose');
 
 async function connect(mongoUrl) {
-  if (!mongoUrl) {
-    throw new Error('MONGO_URL manquant dans les variables d’environnement.');
-  }
+  if (!mongoUrl) throw new Error('MONGO_URL manquant.');
   await mongoose.connect(mongoUrl);
 }
 

@@ -1,167 +1,195 @@
-const { Client, GatewayIntentBits, Events, REST, Routes } = require('discord.js');
+const { Client, Events, GatewayIntentBits } = require('discord.js');
 const config = require('./config');
 const { connect } = require('./database');
-const commands = require('./commands');
-const VoiceStat = require('./models/VoiceStat');
-const MessageStat = require('./models/MessageStat');
-const { buildEmbed, buildRow } = require('./commands/help');
-const { getGuildEmbedColor } = require('./util/embedTheme');
+const { parseCommandLine } = require('./lib/parser');
+const { canRunCommand, isOwner } = require('./lib/access');
+const { COMMAND_META } = require('./meta');
+const util = require('./commands/util');
+const mod = require('./commands/mod');
+const admin = require('./commands/admin');
+const { help, buildCategoryEmbed } = require('./commands/helpCmd');
+const { guildEmbedColor } = require('./lib/embedUtil');
 
-function validateConfig() {
-  const missing = [];
-  if (!config.token) missing.push('DISCORD_TOKEN');
-  if (!config.clientId) missing.push('DISCORD_CLIENT_ID');
-  if (!config.mongoUrl) missing.push('MONGO_URL');
-  if (missing.length) {
-    throw new Error(`Variables manquantes : ${missing.join(', ')}`);
-  }
-}
-
-async function registerSlash(client) {
-  const body = commands.map((c) => c.data.toJSON());
-  const rest = new REST({ version: '10' }).setToken(config.token);
-  if (config.guildId) {
-    await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body });
-  } else {
-    await rest.put(Routes.applicationCommands(config.clientId), { body });
-  }
-  console.log(`[slash] ${body.length} commande(s) enregistrée(s).`);
+function validate() {
+  const m = [];
+  if (!config.token) m.push('DISCORD_TOKEN');
+  if (!config.mongoUrl) m.push('MONGO_URL');
+  if (!config.ownerIds.length) m.push('BOT_OWNER_IDS (au moins un propriétaire)');
+  if (m.length) throw new Error(`Manquant : ${m.join(', ')}`);
 }
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildModeration,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildModeration,
   ],
 });
 
-client.commands = new Map();
-for (const cmd of commands) {
-  client.commands.set(cmd.data.name, cmd);
-}
+client.snipes = new Map();
+client.helpAuthors = new Map();
 
-client.voiceSessions = new Map();
-client.helpOwners = new Map();
+client.once(Events.ClientReady, (c) => {
+  console.log(`Sayuri Gestion prêt : ${c.user.tag}`);
+});
 
-client.once(Events.ClientReady, async (c) => {
-  console.log(`Sayuri Gestion connecté : ${c.user.tag}`);
-  if (config.registerOnStart) {
-    try {
-      await registerSlash(client);
-    } catch (e) {
-      console.error('[slash] échec enregistrement :', e.message);
-    }
-  }
+client.on(Events.MessageDelete, async (msg) => {
+  if (!msg.guild || msg.author?.bot || !msg.channel?.isTextBased?.()) return;
+  client.snipes.set(msg.channel.id, {
+    content: msg.content || '',
+    tag: msg.author?.tag || '?',
+    id: msg.author?.id,
+    at: Date.now(),
+    image: msg.attachments?.first()?.proxyURL || null,
+  });
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (interaction.isButton()) {
-    const m = interaction.customId.match(/^help_show_(\d+)$/);
-    if (m) {
-      const idx = parseInt(m[1], 10);
-      const owner = client.helpOwners.get(interaction.message.id);
-      if (owner && interaction.user.id !== owner) {
-        return interaction.reply({
-          content: 'Ce panneau d’aide ne t’est pas destiné.',
-          ephemeral: true,
-        });
-      }
-      const color = await getGuildEmbedColor(interaction.guild.id);
-      return interaction.update({
-        embeds: [buildEmbed(idx, color)],
-        components: [buildRow(idx)],
-      });
-    }
+  if (!interaction.isStringSelectMenu() || interaction.customId !== 'help_tab') return;
+  const owner = client.helpAuthors.get(interaction.message.id);
+  if (owner && interaction.user.id !== owner) {
+    return interaction.reply({ content: 'Ce menu d’aide ne t’est pas destiné.', ephemeral: true });
   }
-
-  if (!interaction.isChatInputCommand()) return;
-  const cmd = client.commands.get(interaction.commandName);
-  if (!cmd?.execute) return;
+  const catId = interaction.values[0];
+  const color = await guildEmbedColor(interaction.guild.id);
   try {
-    await cmd.execute(interaction);
-    if (interaction.commandName === 'help') {
-      const reply = await interaction.fetchReply().catch(() => null);
-      if (reply?.id) {
-        client.helpOwners.set(reply.id, interaction.user.id);
-        setTimeout(() => client.helpOwners.delete(reply.id), 3_600_000);
-      }
-    }
+    await interaction.update({
+      embeds: [buildCategoryEmbed(catId, color)],
+      components: [admin.helpMainComponents()],
+    });
   } catch (e) {
     console.error(e);
-    const payload = { content: 'Erreur pendant la commande.', ephemeral: true };
-    if (interaction.deferred || interaction.replied) {
-      await interaction.followUp(payload).catch(() => null);
-    } else {
-      await interaction.reply(payload).catch(() => null);
-    }
   }
 });
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guild) return;
-  if (!message.system && message.channel?.isTextBased?.() && !message.channel.isDMBased()) {
-    try {
-      await MessageStat.findOneAndUpdate(
-        {
-          guildId: message.guild.id,
-          userId: message.author.id,
-          channelId: message.channel.id,
-        },
-        { $inc: { count: 1 } },
-        { upsert: true }
-      );
-    } catch (e) {
-      console.error('[MessageStat]', e.message);
-    }
-  }
   if (!message.content.startsWith(config.prefix)) return;
-  const raw = message.content.slice(config.prefix.length).trim();
-  if (!raw) return;
-  const args = raw.split(/\s+/);
-  const name = args.shift().toLowerCase();
-  const cmd = client.commands.get(name);
-  if (!cmd?.executePrefix) return;
+
+  const parsed = parseCommandLine(message.content.slice(config.prefix.length));
+  if (!parsed?.key) return;
+
+  const key = parsed.key;
+  const meta = COMMAND_META[key];
+
+  if (!meta) {
+    await message.reply('Commande inconnue. Utilise `+help`.').catch(() => null);
+    return;
+  }
+
+  if (meta.ownerOnly && !isOwner(message.author.id)) {
+    await message.reply('Réservé au **propriétaire du bot** (`BOT_OWNER_IDS`).').catch(() => null);
+    return;
+  }
+
+  if (!(await canRunCommand(message.member, message.guild, key, meta))) {
+    await message
+      .reply({
+        content:
+          '**Permission refusée.** Il faut être **administrateur Discord**, **botadmin**, ou utiliser une commande rendue publique (`+publiccmd`).',
+      })
+      .catch(() => null);
+    return;
+  }
+
   try {
-    const out = await cmd.executePrefix(message, args);
-    if (name === 'help' && out?.id) {
-      client.helpOwners.set(out.id, message.author.id);
-      setTimeout(() => client.helpOwners.delete(out.id), 3_600_000);
-    }
+    await dispatch(message, client, key, parsed);
   } catch (e) {
     console.error(e);
-    await message.reply('Erreur pendant la commande.').catch(() => null);
+    await message.reply(`Erreur : ${e.message}`).catch(() => null);
   }
 });
 
-client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
-  const member = newState.member || oldState.member;
-  if (!member || member.user.bot) return;
-  const guildId = member.guild.id;
-  const userId = member.id;
-  const key = `${guildId}_${userId}`;
+async function dispatch(message, client, key, parsed) {
+  const { sub, args, text } = parsed;
 
-  if (oldState.channelId && !newState.channelId) {
-    const start = client.voiceSessions.get(key);
-    if (start) {
-      const ms = Date.now() - start;
-      await VoiceStat.findOneAndUpdate(
-        { guildId, userId },
-        { $inc: { totalMs: ms } },
-        { upsert: true }
-      );
-      client.voiceSessions.delete(key);
-    }
-  } else if (!oldState.channelId && newState.channelId) {
-    client.voiceSessions.set(key, Date.now());
+  switch (key) {
+    case 'help':
+      return help(message, client);
+    case 'changelogs':
+      return util.changelogs(message);
+    case 'allbots':
+      return util.allbots(message);
+    case 'alladmins':
+      return util.alladmins(message);
+    case 'botadmins':
+      return util.botadmins(message);
+    case 'boosters':
+      return util.boosters(message);
+    case 'rolemembers':
+      return util.rolemembers(message, args);
+    case 'serverinfo':
+      return util.serverinfo(message);
+    case 'vocinfo':
+      return util.vocinfo(message);
+    case 'role':
+      return util.role(message, args);
+    case 'channel':
+      return util.channel(message, args);
+    case 'user':
+      return util.user(message, args);
+    case 'member':
+      return util.member(message, args);
+    case 'pic':
+      return util.pic(message, args);
+    case 'banner':
+      return util.banner(message, args);
+    case 'server':
+      return util.serverAsset(message, sub);
+    case 'snipe':
+      return util.snipe(message, client);
+    case 'emoji':
+      return util.emoji(message, args);
+    case 'calc':
+      return util.calc(message, args);
+    case 'wiki':
+      return util.wiki(message, args.join(' '));
+    case 'searchwiki':
+      return util.searchwiki(message, text);
+    case 'crowbots':
+      return util.crowbots(message);
+
+    case 'botadmin':
+      return admin.botadmin(message, args);
+    case 'publiccmd':
+      return admin.publiccmd(message, args);
+    case 'settings':
+      return admin.settings(message);
+    case 'theme':
+      return admin.theme(message, args);
+
+    case 'clear':
+      return mod.clear(message, args);
+    case 'kick':
+      return mod.kick(message, args);
+    case 'ban':
+      return mod.ban(message, args);
+    case 'unban':
+      return mod.unban(message, args);
+    case 'timeout':
+      return mod.timeout(message, args);
+    case 'warn':
+      return mod.warn(message, args);
+    case 'sanctions':
+      return mod.sanctions(message, args);
+    case 'lock':
+      return mod.lock(message, args);
+    case 'unlock':
+      return mod.unlock(message, args);
+    case 'addrole':
+      return mod.addrole(message, args);
+    case 'delrole':
+      return mod.delrole(message, args);
+
+    default:
+      return message.reply('Commande listée mais pas encore branchée.');
   }
-});
+}
 
 async function main() {
-  validateConfig();
+  validate();
   await connect(config.mongoUrl);
   await client.login(config.token);
 }

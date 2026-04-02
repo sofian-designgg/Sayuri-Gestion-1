@@ -2,14 +2,16 @@ require('dotenv').config();
 
 module.exports = {
   token: process.env.DISCORD_TOKEN,
-  clientId: process.env.DISCORD_CLIENT_ID,
   mongoUrl: process.env.MONGO_URL,
-  guildId: process.env.GUILD_ID || null,
-  gestionRoleId: process.env.GESTION_ROLE_ID || null,
-  staffRoleIds: (process.env.STAFF_ROLE_IDS || '')
+  prefix: process.env.BOT_PREFIX || '+',
+  ownerIds: (process.env.BOT_OWNER_IDS || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  registerOnStart: String(process.env.REGISTER_ON_START || 'true').toLowerCase() === 'true',
-  prefix: '+',
+  defaultEmbedColor: parseInt(
+    (process.env.DEFAULT_EMBED_COLOR || '9b59b6').replace(/^#/, ''),
+    16
+  ),
+  /** Lien affiché par +crowbots */
+  crowSupportUrl: process.env.CROW_SUPPORT_INVITE || 'https://discord.gg/',
 };
