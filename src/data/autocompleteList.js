@@ -35,6 +35,8 @@ module.exports.AUTOCOMPLETE_VALUES = [
   'set banner',
   'set profil',
   'theme',
+  'publiccmd',
+  'settings',
   'playto',
   'listen',
   'watch',

@@ -55,10 +55,11 @@ async function help(message, client) {
   const embed = new EmbedBuilder()
     .setTitle('📚 Sayuri Gestion')
     .setDescription(
-      '**Menu complet** (type Crow Bots) : choisis une **catégorie** ci-dessous.\n\n' +
-        '• **/run** + autocomplete : lance une commande comme avec `+`.\n' +
-        '• Par défaut : **admin Discord**, **botadmin** ou **owner** ; sinon **+publiccmd** / **+publiccmd add**.\n' +
-        '• **+help** et **/help** affichent la même chose.'
+      'Choisis une **catégorie** ci-dessous.\n\n' +
+        '• **/run** + autocomplete = même chose que `+` (arguments **optionnels** selon les cas).\n' +
+        '• Commande sans code dédié → embed **reconnue**, pas d’erreur agressive.\n' +
+        '• Accès : **admin**, **botadmin**, **owner** ; **+publiccmd** pour le public.\n' +
+        '• **+help** = **/help**.'
     )
     .setColor(color);
   const msg = await message.reply({
@@ -74,10 +75,10 @@ async function helpSlash(interaction, client) {
   const embed = new EmbedBuilder()
     .setTitle('📚 Sayuri Gestion')
     .setDescription(
-      '**Menu complet** (type Crow Bots) : choisis une **catégorie** ci-dessous.\n\n' +
-        '• **/run** + autocomplete : toutes les commandes listées ici.\n' +
-        '• Permissions : **admin**, **botadmin**, **owner**, ou commandes **+publiccmd**.\n' +
-        '• Équivalent **+help**.'
+      '**Menu complet** : choisis une **catégorie**.\n\n' +
+        '• **/run** : autocomplete + arguments optionnels.\n' +
+        '• Toute commande listée est **reconnue** ; sans code dédié → embed informatif.\n' +
+        '• **+help** = **/help**.'
     )
     .setColor(color);
   await interaction.reply({ embeds: [embed], components: [helpMainComponents()], fetchReply: true });

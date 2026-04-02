@@ -1,9 +1,8 @@
-/**
- * Métadonnées des commandes enregistrées.
- * allowPublic: si true, la commande peut être ajoutée à +publiccmd pour @everyone.
- * ownerOnly: réservé BOT_OWNER_IDS
- */
-module.exports.COMMAND_META = {
+const { parseCommandLine } = require('./lib/parser');
+const { AUTOCOMPLETE_VALUES } = require('./data/autocompleteList');
+
+/** Métadonnées explicites (prioritaires sur l’auto-généré). */
+const BASE_META = {
   help: { allowPublic: true },
   changelogs: { allowPublic: true },
   allbots: { allowPublic: true },
@@ -45,5 +44,54 @@ module.exports.COMMAND_META = {
   delrole: { allowPublic: false },
 };
 
-/** Clés réellement codées dans le bot */
-module.exports.IMPLEMENTED = new Set(Object.keys(module.exports.COMMAND_META));
+const COMMAND_META = { ...BASE_META };
+for (const line of AUTOCOMPLETE_VALUES) {
+  const p = parseCommandLine(line);
+  if (p?.key && COMMAND_META[p.key] === undefined) {
+    COMMAND_META[p.key] = { allowPublic: false };
+  }
+}
+
+/** Clés avec handler complet (pas le stub). */
+const IMPLEMENTED_KEYS = new Set([
+  'help',
+  'changelogs',
+  'allbots',
+  'alladmins',
+  'botadmins',
+  'boosters',
+  'rolemembers',
+  'serverinfo',
+  'vocinfo',
+  'role',
+  'channel',
+  'user',
+  'member',
+  'pic',
+  'banner',
+  'server',
+  'snipe',
+  'emoji',
+  'calc',
+  'wiki',
+  'searchwiki',
+  'crowbots',
+  'botadmin',
+  'publiccmd',
+  'settings',
+  'theme',
+  'clear',
+  'kick',
+  'ban',
+  'unban',
+  'timeout',
+  'warn',
+  'sanctions',
+  'lock',
+  'unlock',
+  'addrole',
+  'delrole',
+]);
+
+module.exports.COMMAND_META = COMMAND_META;
+module.exports.IMPLEMENTED_KEYS = IMPLEMENTED_KEYS;

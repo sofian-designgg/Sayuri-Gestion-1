@@ -13,6 +13,17 @@ async function clear(message, args) {
   if (!me.permissions.has(PermissionFlagsBits.ManageMessages)) {
     return message.reply('Il me faut **Gérer les messages**.');
   }
+  const first = args[0];
+  if (first && Number.isNaN(parseInt(first, 10)) && !message.mentions.users.first()) {
+    const { stubFromParsed } = require('./stub');
+    return stubFromParsed(message, {
+      key: 'clear',
+      sub: null,
+      args,
+      text: '',
+      raw: '',
+    });
+  }
   const n = Math.min(100, Math.max(1, parseInt(args[0], 10) || 10));
   const target = message.mentions.users.first();
   const ch = message.channel;

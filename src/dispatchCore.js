@@ -2,6 +2,7 @@ const util = require('./commands/util');
 const mod = require('./commands/mod');
 const admin = require('./commands/admin');
 const { help } = require('./commands/helpCmd');
+const { stubFromParsed } = require('./commands/stub');
 
 module.exports = async function dispatchCore(message, client, key, parsed) {
   const { sub, args, text } = parsed;
@@ -85,8 +86,6 @@ module.exports = async function dispatchCore(message, client, key, parsed) {
       return mod.delrole(message, args);
 
     default:
-      return message.reply(
-        '📝 **Commande inconnue** ou **pas encore codée** sur Sayuri. Vérifie **/help** ou l’autocomplete **/run** ; les lignes **✓** dans l’aide sont actives.'
-      );
+      return stubFromParsed(message, parsed);
   }
 };
