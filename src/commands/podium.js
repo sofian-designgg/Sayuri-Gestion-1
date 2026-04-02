@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const VoiceStat = require('../models/VoiceStat');
 const { isStaff, getGestionRoleId } = require('../util/permissions');
 const { msToHuman } = require('../util/format');
+const { getGuildEmbedColor } = require('../util/embedTheme');
 
 async function canUse(member) {
   const rid = await getGestionRoleId(member.guild.id);
@@ -43,10 +44,11 @@ module.exports = {
     const lines = rows.map((r, i) => {
       return `**${i + 1}.** ${r.m.displayName} — ${msToHuman(r.ms)}`;
     });
+    const color = await getGuildEmbedColor(interaction.guild.id);
     const embed = new EmbedBuilder()
       .setTitle('Podium vocal — Gestion (top 20)')
       .setDescription(lines.length ? lines.join('\n') : 'Pas encore de données vocales.')
-      .setColor(0xf1c40f);
+      .setColor(color);
     await interaction.reply({ embeds: [embed] });
   },
   async executePrefix(message) {
@@ -72,10 +74,11 @@ module.exports = {
     const lines = rows.map((r, i) => {
       return `**${i + 1}.** ${r.m.displayName} — ${msToHuman(r.ms)}`;
     });
+    const color = await getGuildEmbedColor(message.guild.id);
     const embed = new EmbedBuilder()
       .setTitle('Podium vocal — Gestion (top 20)')
       .setDescription(lines.length ? lines.join('\n') : 'Pas encore de données vocales.')
-      .setColor(0xf1c40f);
+      .setColor(color);
     return message.reply({ embeds: [embed] });
   },
 };

@@ -3,6 +3,7 @@ const { isStaff } = require('../util/permissions');
 const BlrEntry = require('../models/BlrEntry');
 const GuildConfig = require('../models/GuildConfig');
 const { sendModLog } = require('../util/modlog');
+const { getGuildEmbedColor } = require('../util/embedTheme');
 
 async function getOrCreateConfig(guildId) {
   let gc = await GuildConfig.findOne({ guildId });
@@ -64,8 +65,9 @@ async function runList(guild, moderator) {
     return { ok: false, msg: 'Tu n’as pas la permission d’utiliser cette commande.' };
   }
   const entries = await BlrEntry.find({ guildId: guild.id }).sort({ addedAt: -1 }).lean();
+  const color = await getGuildEmbedColor(guild.id);
   if (!entries.length) {
-    return { ok: true, embed: new EmbedBuilder().setTitle('BLR').setDescription('Liste vide.').setColor(0x3498db) };
+    return { ok: true, embed: new EmbedBuilder().setTitle('BLR').setDescription('Liste vide.').setColor(color) };
   }
   const lines = [];
   for (const e of entries.slice(0, 40)) {
@@ -74,7 +76,7 @@ async function runList(guild, moderator) {
   const embed = new EmbedBuilder()
     .setTitle(`BLR — ${entries.length} entrée(s)`)
     .setDescription(lines.join('\n') || '—')
-    .setColor(0xe74c3c);
+    .setColor(color);
   if (entries.length > 40) {
     embed.setFooter({ text: `Affichage des 40 premiers sur ${entries.length}` });
   }
@@ -114,13 +116,17 @@ async function runRolesList(guild, moderator) {
   }
   const gc = await getOrCreateConfig(guild.id);
   const ids = gc.blrRestrictedRoleIds;
+  const color = await getGuildEmbedColor(guild.id);
   if (!ids.length) {
-    return { ok: true, embed: new EmbedBuilder().setTitle('Rôles BLR').setDescription('Aucun rôle configuré.').setColor(0x3498db) };
+    return { ok: true, embed: new EmbedBuilder().setTitle('Rôles BLR').setDescription('Aucun rôle configuré.').setColor(color) };
   }
   const desc = ids.map((id) => `<@&${id}>`).join('\n');
   return {
     ok: true,
-    embed: new EmbedBuilder().setTitle('Rôles retirés à l’ajout au BLR').setDescription(desc).setColor(0x9b59b6),
+    embed: new EmbedBuilder()
+      .setTitle('Rôles retirés à l’ajout au BLR')
+      .setDescription(desc)
+      .setColor(color),
   };
 }
 

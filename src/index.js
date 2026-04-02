@@ -3,7 +3,9 @@ const config = require('./config');
 const { connect } = require('./database');
 const commands = require('./commands');
 const VoiceStat = require('./models/VoiceStat');
+const MessageStat = require('./models/MessageStat');
 const { buildEmbed, buildRow } = require('./commands/help');
+const { getGuildEmbedColor } = require('./util/embedTheme');
 
 function validateConfig() {
   const missing = [];
@@ -68,8 +70,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           ephemeral: true,
         });
       }
+      const color = await getGuildEmbedColor(interaction.guild.id);
       return interaction.update({
-        embeds: [buildEmbed(idx)],
+        embeds: [buildEmbed(idx, color)],
         components: [buildRow(idx)],
       });
     }
@@ -100,6 +103,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guild) return;
+  if (!message.system && message.channel?.isTextBased?.() && !message.channel.isDMBased()) {
+    try {
+      await MessageStat.findOneAndUpdate(
+        {
+          guildId: message.guild.id,
+          userId: message.author.id,
+          channelId: message.channel.id,
+        },
+        { $inc: { count: 1 } },
+        { upsert: true }
+      );
+    } catch (e) {
+      console.error('[MessageStat]', e.message);
+    }
+  }
   if (!message.content.startsWith(config.prefix)) return;
   const raw = message.content.slice(config.prefix.length).trim();
   if (!raw) return;

@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { isStaff } = require('../util/permissions');
+const { getGuildEmbedColor } = require('../util/embedTheme');
 
 const CHUNK = 4000;
 
@@ -19,10 +20,11 @@ module.exports = {
       .filter((m) => m.roles.cache.has(role.id) && !m.user.bot)
       .sort((a, b) => a.displayName.localeCompare(b.displayName, 'fr', { sensitivity: 'base' }));
     const list = members.map((m) => m.user.tag).join('\n') || 'Aucun membre.';
+    const color = await getGuildEmbedColor(interaction.guild.id);
     const embed = new EmbedBuilder()
       .setTitle(`Membres — ${role.name}`)
       .setDescription(list.length > CHUNK ? `${list.slice(0, CHUNK - 20)}…` : list)
-      .setColor(role.color || 0x5865f2)
+      .setColor(color)
       .setFooter({ text: `${members.size} membre(s)` });
     await interaction.editReply({ embeds: [embed] });
   },
@@ -42,10 +44,11 @@ module.exports = {
       .filter((m) => m.roles.cache.has(role.id) && !m.user.bot)
       .sort((a, b) => a.displayName.localeCompare(b.displayName, 'fr', { sensitivity: 'base' }));
     const list = members.map((m) => m.user.tag).join('\n') || 'Aucun membre.';
+    const color = await getGuildEmbedColor(message.guild.id);
     const embed = new EmbedBuilder()
       .setTitle(`Membres — ${role.name}`)
       .setDescription(list.length > CHUNK ? `${list.slice(0, CHUNK - 20)}…` : list)
-      .setColor(role.color || 0x5865f2)
+      .setColor(color)
       .setFooter({ text: `${members.size} membre(s)` });
     await msg.edit({ content: null, embeds: [embed] });
   },

@@ -1,8 +1,10 @@
 module.exports = [
   require('./help'),
+  require('./addallrole'),
   require('./blr'),
   require('./check'),
   require('./config'),
+  require('./msg'),
   require('./podium'),
   require('./rlm'),
   require('./stats'),

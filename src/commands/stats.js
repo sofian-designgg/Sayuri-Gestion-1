@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ChannelType } = require('discord.js');
+const { getGuildEmbedColor } = require('../util/embedTheme');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -10,6 +11,7 @@ module.exports = {
     const text = g.channels.cache.filter((c) => c.type === ChannelType.GuildText).size;
     const voice = g.channels.cache.filter((c) => c.type === ChannelType.GuildVoice).size;
     const cats = g.channels.cache.filter((c) => c.type === ChannelType.GuildCategory).size;
+    const color = await getGuildEmbedColor(g.id);
     const embed = new EmbedBuilder()
       .setTitle(`Statistiques — ${g.name}`)
       .addFields(
@@ -28,7 +30,7 @@ module.exports = {
         }
       )
       .setThumbnail(g.iconURL({ size: 256 }))
-      .setColor(0x3498db);
+      .setColor(color);
     await interaction.reply({ embeds: [embed] });
   },
   async executePrefix(message) {
@@ -37,6 +39,7 @@ module.exports = {
     const text = g.channels.cache.filter((c) => c.type === ChannelType.GuildText).size;
     const voice = g.channels.cache.filter((c) => c.type === ChannelType.GuildVoice).size;
     const cats = g.channels.cache.filter((c) => c.type === ChannelType.GuildCategory).size;
+    const color = await getGuildEmbedColor(g.id);
     const embed = new EmbedBuilder()
       .setTitle(`Statistiques — ${g.name}`)
       .addFields(
@@ -55,7 +58,7 @@ module.exports = {
         }
       )
       .setThumbnail(g.iconURL({ size: 256 }))
-      .setColor(0x3498db);
+      .setColor(color);
     return message.reply({ embeds: [embed] });
   },
 };

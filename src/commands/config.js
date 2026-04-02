@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const GuildConfig = require('../models/GuildConfig');
+const { parseHexColor, intToHex, getGuildEmbedColor } = require('../util/embedTheme');
 
 function isAdmin(member) {
   return member.permissions.has(PermissionFlagsBits.Administrator);
@@ -32,6 +33,17 @@ module.exports = {
             .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
         )
     )
+    .addSubcommand((sc) =>
+      sc
+        .setName('embed-couleur')
+        .setDescription('Couleur des embeds du bot (#RRGGBB ou default pour le thème par défaut).')
+        .addStringOption((o) =>
+          o
+            .setName('code')
+            .setDescription('Ex. #5865F2 ou default')
+            .setRequired(true)
+        )
+    )
     .addSubcommand((sc) => sc.setName('voir').setDescription('Afficher la configuration actuelle')),
   async execute(interaction) {
     if (!isAdmin(interaction.member)) {
@@ -56,6 +68,37 @@ module.exports = {
       });
     }
 
+    if (sub === 'embed-couleur') {
+      const raw = interaction.options.getString('code', true).trim();
+      const low = raw.toLowerCase();
+      if (['default', 'defaut', 'reset', 'aucun'].includes(low)) {
+        gc.embedColor = null;
+        await gc.save();
+        const resolved = await getGuildEmbedColor(interaction.guild.id);
+        return interaction.reply({
+          content: `Couleur embeds réinitialisée. Aperçu : **${intToHex(resolved)}**`,
+        });
+      }
+      const parsed = parseHexColor(raw);
+      if (parsed == null) {
+        return interaction.reply({
+          content: 'Code invalide. Utilise un hex à 6 chiffres, ex. `#5865F2`, ou `default`.',
+          ephemeral: true,
+        });
+      }
+      gc.embedColor = parsed;
+      await gc.save();
+      return interaction.reply({
+        content: `Couleur des embeds définie : **${intToHex(parsed)}**`,
+      });
+    }
+
+    const resolvedColor = await getGuildEmbedColor(interaction.guild.id);
+    const couleurLigne =
+      gc.embedColor != null
+        ? `Personnalisée : **${intToHex(gc.embedColor)}**`
+        : `Thème actuel : **${intToHex(resolvedColor)}** _(défaut / env)_`;
+
     const embed = new EmbedBuilder()
       .setTitle('Configuration Sayuri Gestion')
       .addFields(
@@ -70,6 +113,11 @@ module.exports = {
           inline: true,
         },
         {
+          name: 'Couleur embeds',
+          value: couleurLigne,
+          inline: false,
+        },
+        {
           name: 'Rôles BLR',
           value:
             gc.blrRestrictedRoleIds.length > 0
@@ -78,7 +126,7 @@ module.exports = {
           inline: false,
         }
       )
-      .setColor(0x95a5a6);
+      .setColor(resolvedColor);
     await interaction.reply({ embeds: [embed] });
   },
   async executePrefix(message, args) {
@@ -113,7 +161,33 @@ module.exports = {
       );
     }
 
+    if (sub === 'couleur' || sub === 'embed' || sub === 'embed-couleur') {
+      const code = (args[1] || '').trim();
+      const low = code.toLowerCase();
+      if (!code) {
+        return message.reply('Usage : `+config couleur #RRGGBB` ou `+config couleur default`');
+      }
+      if (['default', 'defaut', 'reset', 'aucun'].includes(low)) {
+        gc.embedColor = null;
+        await gc.save();
+        const resolved = await getGuildEmbedColor(message.guild.id);
+        return message.reply(`Couleur embeds réinitialisée. Aperçu : **${intToHex(resolved)}**`);
+      }
+      const parsed = parseHexColor(code);
+      if (parsed == null) {
+        return message.reply('Code invalide. Ex. `#5865F2` ou `default`.');
+      }
+      gc.embedColor = parsed;
+      await gc.save();
+      return message.reply(`Couleur des embeds définie : **${intToHex(parsed)}**`);
+    }
+
     if (sub === 'voir' || sub === 'view') {
+      const resolvedColor = await getGuildEmbedColor(message.guild.id);
+      const couleurLigne =
+        gc.embedColor != null
+          ? `Personnalisée : **${intToHex(gc.embedColor)}**`
+          : `Thème actuel : **${intToHex(resolvedColor)}** _(défaut / env)_`;
       const embed = new EmbedBuilder()
         .setTitle('Configuration Sayuri Gestion')
         .addFields(
@@ -128,6 +202,11 @@ module.exports = {
             inline: true,
           },
           {
+            name: 'Couleur embeds',
+            value: couleurLigne,
+            inline: false,
+          },
+          {
             name: 'Rôles BLR',
             value:
               gc.blrRestrictedRoleIds.length > 0
@@ -136,10 +215,12 @@ module.exports = {
             inline: false,
           }
         )
-        .setColor(0x95a5a6);
+        .setColor(resolvedColor);
       return message.reply({ embeds: [embed] });
     }
 
-    return message.reply('Usage : `+config gestion @Rôle` · `+config modlog #salon` · `+config voir`');
+    return message.reply(
+      'Usage : `+config gestion @Rôle` · `+config modlog #salon` · `+config couleur #hex` · `+config voir`'
+    );
   },
 };

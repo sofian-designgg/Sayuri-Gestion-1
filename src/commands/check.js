@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { isStaff, getGestionRoleId } = require('../util/permissions');
+const { getGuildEmbedColor } = require('../util/embedTheme');
 
 async function canUse(member) {
   const rid = await getGestionRoleId(member.guild.id);
@@ -37,10 +38,11 @@ module.exports = {
         lines.push(`**${m.displayName}** → pas en vocal`);
       }
     }
+    const color = await getGuildEmbedColor(interaction.guild.id);
     const embed = new EmbedBuilder()
       .setTitle('Statut vocal — Gestion')
       .setDescription(lines.length ? lines.join('\n') : 'Aucun membre avec ce rôle.')
-      .setColor(0x2ecc71);
+      .setColor(color);
     await interaction.reply({ embeds: [embed] });
   },
   async executePrefix(message) {
@@ -64,10 +66,11 @@ module.exports = {
         lines.push(`**${m.displayName}** → pas en vocal`);
       }
     }
+    const color = await getGuildEmbedColor(message.guild.id);
     const embed = new EmbedBuilder()
       .setTitle('Statut vocal — Gestion')
       .setDescription(lines.length ? lines.join('\n') : 'Aucun membre avec ce rôle.')
-      .setColor(0x2ecc71);
+      .setColor(color);
     return message.reply({ embeds: [embed] });
   },
 };

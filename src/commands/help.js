@@ -5,6 +5,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require('discord.js');
+const { getGuildEmbedColor } = require('../util/embedTheme');
 
 const SECTIONS = [
   {
@@ -17,7 +18,7 @@ const SECTIONS = [
       '`/blr roles` / `+blr roles` — Rôles retirés à l’ajout au BLR',
       '`/check` / `+check` — Statut vocal des membres avec le rôle Gestion',
       '`/podium` / `+podium` — Top 20 temps vocal (rôle Gestion)',
-      '`/config` / `+config` — Rôle Gestion, salon logs (admin)',
+      '`/config` / `+config` — Rôle Gestion, salon logs, couleur embeds (admin)',
     ],
   },
   {
@@ -28,6 +29,7 @@ const SECTIONS = [
       '`/unto` / `+unto` — Retirer le timeout',
       '`/untoall` / `+untoall` — Retirer tous les timeouts',
       '`/rlm` / `+rlm` — Membres d’un rôle (liste stable)',
+      '`/addallrole` / `+addallrole` — Donner un rôle à tous les humains (sans bots)',
     ],
   },
   {
@@ -35,20 +37,22 @@ const SECTIONS = [
     label: 'Infos',
     lines: [
       '`/stats` / `+stats` — Statistiques du serveur',
-      '`/vc` / `+vc` — Temps vocal (vous ou un membre)',
+      '`/vc` / `+vc` — Temps vocal (graphique + jauge)',
+      '`/msg stats` / `+msg` — Messages + top salons perso',
+      '`/msg serveur` / `+msg serveur` — Classement salons du serveur',
       '`/help` / `+help` — Ce panneau',
     ],
   },
 ];
 
-function buildEmbed(sectionIndex) {
+function buildEmbed(sectionIndex, color) {
   const s = SECTIONS[sectionIndex] || SECTIONS[0];
   return new EmbedBuilder()
     .setTitle('Sayuri Gestion — Aide')
     .setDescription(
       `Préfixe : **+** · Slash : **/**\n\n**${s.label}**\n${s.lines.join('\n')}`
     )
-    .setColor(0x9b59b6)
+    .setColor(color ?? 0x9b59b6)
     .setFooter({ text: `Section ${sectionIndex + 1}/${SECTIONS.length}` });
 }
 
@@ -75,15 +79,17 @@ module.exports = {
     .setDescription('Affiche le centre d’aide interactif du bot.'),
   async execute(interaction) {
     const i = 0;
+    const color = await getGuildEmbedColor(interaction.guild.id);
     await interaction.reply({
-      embeds: [buildEmbed(i)],
+      embeds: [buildEmbed(i, color)],
       components: [buildRow(i)],
     });
   },
   async executePrefix(message) {
     const i = 0;
+    const color = await getGuildEmbedColor(message.guild.id);
     const msg = await message.reply({
-      embeds: [buildEmbed(i)],
+      embeds: [buildEmbed(i, color)],
       components: [buildRow(i)],
     });
     return msg;
