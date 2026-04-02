@@ -3,6 +3,7 @@ const Sanction = require('../models/Sanction');
 const { guildEmbedColor } = require('../lib/embedUtil');
 const { resolveMember, resolveRole } = require('../lib/resolvers');
 const { parseDurationMs } = require('../lib/duration');
+const { sendModLog } = require('../lib/modlog');
 
 async function colorOf(message) {
   return guildEmbedColor(message.guild.id);
@@ -50,6 +51,7 @@ async function kick(message, args) {
     .trim() || 'Sans raison';
   if (!m.kickable) return message.reply('Je ne peux pas expulser ce membre.');
   await m.kick(reason);
+  await sendModLog(message.guild, message.client, 'Kick', `${m} par ${message.author}\n**Raison :** ${reason}`);
   const c = await colorOf(message);
   await message.reply({
     embeds: [
@@ -80,6 +82,7 @@ async function ban(message, args) {
   } catch (e) {
     return message.reply(`Erreur : ${e.message}`);
   }
+  await sendModLog(message.guild, message.client, 'Ban', `<@${id}> par ${message.author}\n**Raison :** ${reason}`);
   const c = await colorOf(message);
   await message.reply({
     embeds: [
@@ -96,6 +99,7 @@ async function unban(message, args) {
   const id = args[0].replace(/\D/g, '');
   if (!/^\d{17,20}$/.test(id)) return message.reply('ID invalide.');
   await message.guild.bans.remove(id).catch((e) => message.reply(`Impossible : ${e.message}`));
+  await sendModLog(message.guild, message.client, 'Unban', `<@${id}> par ${message.author}`);
   const c = await colorOf(message);
   await message.reply({
     embeds: [new EmbedBuilder().setTitle('✅ Unban').setDescription(`<@${id}> débanni.`).setColor(c)],
@@ -112,6 +116,7 @@ async function timeout(message, args) {
   const reason = rest.slice(1).join(' ').trim() || 'Timeout';
   if (!m.moderatable) return message.reply('Je ne peux pas timeout ce membre.');
   await m.timeout(ms, reason);
+  await sendModLog(message.guild, message.client, 'Timeout', `${m} — **${dur}** par ${message.author}\n${reason}`);
   const c = await colorOf(message);
   await message.reply({
     embeds: [
@@ -134,6 +139,7 @@ async function warn(message, args) {
     reason,
     moderatorId: message.author.id,
   });
+  await sendModLog(message.guild, message.client, 'Warn', `${m} par ${message.author}\n**Raison :** ${reason}`);
   const c = await colorOf(message);
   await message.reply({
     embeds: [

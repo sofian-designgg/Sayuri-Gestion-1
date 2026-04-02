@@ -36,6 +36,7 @@ async function canRunCommand(member, guild, commandKey, meta) {
   if (isDiscordAdmin(member)) return true;
 
   const gc = await GuildConfig.findOne({ guildId: guild.id }).lean();
+  if (gc?.botOwnerUserIds?.includes(member.id)) return true;
   const pub = gc?.publicCommands || [];
   if (meta?.allowPublic && pub.includes(commandKey)) return true;
   return false;

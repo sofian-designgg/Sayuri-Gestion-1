@@ -1,4 +1,4 @@
-const { Client, Events, GatewayIntentBits } = require('discord.js');
+const { Client, Events, GatewayIntentBits, ChannelType } = require('discord.js');
 const config = require('./config');
 const { connect } = require('./database');
 const { parseCommandLine } = require('./lib/parser');
@@ -11,6 +11,11 @@ const { createSlashProxy } = require('./lib/slashProxy');
 const dispatchCore = require('./dispatchCore');
 const { registerSlashCommands } = require('./slash/register');
 const { AUTOCOMPLETE_VALUES } = require('./data/autocompleteList');
+const { matchPrefix } = require('./lib/prefixCache');
+const GuildConfig = require('./models/GuildConfig');
+const TempBan = require('./models/TempBan');
+const Giveaway = require('./models/Giveaway');
+const extended = require('./commands/extended');
 
 function validate() {
   const m = [];
@@ -33,8 +38,91 @@ const client = new Client({
 client.snipes = new Map();
 client.helpAuthors = new Map();
 
+const antispamBuckets = new Map();
+
+async function sweepTempBans(client) {
+  const due = await TempBan.find({ unbanAt: { $lte: new Date() } }).limit(80).lean();
+  for (const t of due) {
+    const g = client.guilds.cache.get(t.guildId);
+    if (g) await g.bans.remove(t.userId).catch(() => null);
+    await TempBan.deleteOne({ _id: t._id });
+  }
+}
+
+async function sweepGiveaways(client) {
+  const due = await Giveaway.find({ ended: false, endsAt: { $lte: new Date() } }).limit(30);
+  for (const doc of due) {
+    await extended.finalizeGiveaway(client, doc, false);
+  }
+}
+
+async function maybeAutoMod(message) {
+  if (message.author.bot || !message.guild) return;
+  const gc = await GuildConfig.findOne({ guildId: message.guild.id }).lean();
+  if (!gc) return;
+
+  if (gc.antimassmentionEnabled) {
+    const nm = message.mentions.users.size + message.mentions.roles.size + (message.mentions.everyone ? 1 : 0);
+    if (nm >= 5) {
+      await message.delete().catch(() => null);
+      return;
+    }
+  }
+
+  if (gc.piconlyChannelIds?.length && gc.piconlyChannelIds.includes(message.channel.id)) {
+    const hasImg =
+      message.attachments.some((a) => a.contentType?.startsWith('image/')) ||
+      /(\.png|\.jpg|\.jpeg|\.gif|\.webp)(\?|$)/i.test(message.content);
+    if (!hasImg && message.content.trim().length > 0) {
+      await message.delete().catch(() => null);
+      return;
+    }
+  }
+
+  const low = message.content.toLowerCase();
+  if (gc.badwordsList?.length && gc.badwordsList.some((w) => w && low.includes(String(w).toLowerCase()))) {
+    await message.delete().catch(() => null);
+    return;
+  }
+
+  if (gc.antilinkEnabled && /https?:\/\//i.test(message.content)) {
+    await message.delete().catch(() => null);
+    return;
+  }
+
+  if (gc.antispamEnabled) {
+    const k = `${message.guild.id}:${message.channel.id}:${message.author.id}`;
+    const now = Date.now();
+    let arr = antispamBuckets.get(k) || [];
+    arr = arr.filter((t) => now - t < 4000);
+    arr.push(now);
+    antispamBuckets.set(k, arr);
+    if (arr.length >= 6) {
+      await message.delete().catch(() => null);
+      const m = message.member;
+      if (m?.moderatable) await m.timeout(5 * 60 * 1000, 'Antispam Sayuri').catch(() => null);
+    }
+  }
+
+  if (
+    message.channel.type === ChannelType.GuildAnnouncement &&
+    gc.autopublishChannelIds?.includes(message.channel.id)
+  ) {
+    await message.crosspost().catch(() => null);
+  }
+
+  const ar = (gc.autoreactChannelEmoji || []).find((x) => x.channelId === message.channel.id);
+  if (ar?.emoji) {
+    await message.react(ar.emoji).catch(() => null);
+  }
+}
+
 client.once(Events.ClientReady, async (c) => {
   console.log(`Sayuri Gestion prêt : ${c.user.tag}`);
+  setInterval(() => sweepTempBans(c).catch((e) => console.error('[tempban]', e)), 60_000);
+  setInterval(() => sweepGiveaways(c).catch((e) => console.error('[giveaway]', e)), 30_000);
+  sweepTempBans(c).catch(() => null);
+  sweepGiveaways(c).catch(() => null);
   if (config.registerSlash) {
     try {
       await registerSlashCommands();
@@ -43,6 +131,27 @@ client.once(Events.ClientReady, async (c) => {
     }
   } else {
     console.log('[slash] REGISTER_SLASH_COMMANDS=false — pas d’enregistrement.');
+  }
+});
+
+client.on(Events.GuildMemberAdd, async (member) => {
+  const gc = await GuildConfig.findOne({ guildId: member.guild.id }).lean();
+  if (!gc) return;
+  if (member.user.bot) {
+    if (gc.antiraidAntiBot && !(gc.whitelistUserIds || []).includes(member.id)) {
+      await member.kick('Sayuri — anti-bot').catch(() => null);
+    }
+    return;
+  }
+  if ((gc.blacklistUserIds || []).includes(member.id)) {
+    await member.kick('Sayuri — blacklist').catch(() => null);
+    return;
+  }
+  if (gc.welcomeChannelId) {
+    const ch = await member.guild.channels.fetch(gc.welcomeChannelId).catch(() => null);
+    if (ch?.isTextBased?.()) {
+      await ch.send(`Bienvenue ${member} sur **${member.guild.name}** !`).catch(() => null);
+    }
   }
 });
 
@@ -145,35 +254,40 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guild) return;
-  if (!message.content.startsWith(config.prefix)) return;
 
-  const parsed = parseCommandLine(message.content.slice(config.prefix.length));
-  if (!parsed?.key) return;
+  const matched = await matchPrefix(message);
+  if (matched) {
+    const parsed = parseCommandLine(matched.rest);
+    if (parsed?.key) {
+      const key = parsed.key;
+      const meta = COMMAND_META[key];
 
-  const key = parsed.key;
-  const meta = COMMAND_META[key];
+      if (meta?.ownerOnly && !isOwner(message.author.id)) {
+        await message.reply('Réservé au **propriétaire du bot** (`BOT_OWNER_IDS`).').catch(() => null);
+        return;
+      }
 
-  if (meta?.ownerOnly && !isOwner(message.author.id)) {
-    await message.reply('Réservé au **propriétaire du bot** (`BOT_OWNER_IDS`).').catch(() => null);
-    return;
+      if (!(await canRunCommand(message.member, message.guild, key, meta))) {
+        await message
+          .reply({
+            content:
+              '**Permission refusée.** Il faut être **administrateur Discord**, **botadmin**, **owner serveur**, ou utiliser une commande rendue publique (`+publiccmd`).',
+          })
+          .catch(() => null);
+        return;
+      }
+
+      try {
+        await dispatchCore(message, client, key, parsed);
+      } catch (e) {
+        console.error(e);
+        await message.reply(`Erreur : ${e.message}`).catch(() => null);
+      }
+      return;
+    }
   }
 
-  if (!(await canRunCommand(message.member, message.guild, key, meta))) {
-    await message
-      .reply({
-        content:
-          '**Permission refusée.** Il faut être **administrateur Discord**, **botadmin**, ou utiliser une commande rendue publique (`+publiccmd`).',
-      })
-      .catch(() => null);
-    return;
-  }
-
-  try {
-    await dispatchCore(message, client, key, parsed);
-  } catch (e) {
-    console.error(e);
-    await message.reply(`Erreur : ${e.message}`).catch(() => null);
-  }
+  await maybeAutoMod(message);
 });
 
 async function main() {

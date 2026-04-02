@@ -3,6 +3,7 @@ const mod = require('./commands/mod');
 const admin = require('./commands/admin');
 const { help } = require('./commands/helpCmd');
 const { stubFromParsed } = require('./commands/stub');
+const extended = require('./commands/extended');
 
 module.exports = async function dispatchCore(message, client, key, parsed) {
   const { sub, args, text } = parsed;
@@ -39,6 +40,9 @@ module.exports = async function dispatchCore(message, client, key, parsed) {
     case 'banner':
       return util.banner(message, args);
     case 'server':
+      if (sub === 'list') {
+        return extended.cmdServerList(message, client, parsed);
+      }
       return util.serverAsset(message, sub);
     case 'snipe':
       return util.snipe(message, client);
@@ -63,6 +67,7 @@ module.exports = async function dispatchCore(message, client, key, parsed) {
       return admin.theme(message, args);
 
     case 'clear':
+      if (await extended.tryClearSubcommands(message, client, parsed)) return;
       return mod.clear(message, args);
     case 'kick':
       return mod.kick(message, args);
@@ -86,6 +91,9 @@ module.exports = async function dispatchCore(message, client, key, parsed) {
       return mod.delrole(message, args);
 
     default:
+      if (extended.handlers[key]) {
+        return extended.handlers[key](message, client, parsed);
+      }
       return stubFromParsed(message, parsed);
   }
 };

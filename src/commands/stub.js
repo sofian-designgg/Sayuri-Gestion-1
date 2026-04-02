@@ -20,8 +20,7 @@ async function stubFromParsed(message, parsed) {
       new EmbedBuilder()
         .setTitle(`+${label}`)
         .setDescription(
-          'Commande **reconnue**. Tous les paramètres seront **optionnels** dès que le module sera branché.\n' +
-            'Pour l’instant aucune action supplémentaire — utilise une commande déjà complète via `+help` / `/help`.'
+          'Commande **reconnue** sans handler dédié dans cette version. Vérifie `+help` / `/help` ou une variante proche (ex. `+secur`, `+modlog`).'
         )
         .setColor(c),
     ],
