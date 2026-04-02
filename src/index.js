@@ -4,11 +4,13 @@ const { connect } = require('./database');
 const { parseCommandLine } = require('./lib/parser');
 const { canRunCommand, isOwner } = require('./lib/access');
 const { COMMAND_META } = require('./meta');
-const util = require('./commands/util');
-const mod = require('./commands/mod');
-const admin = require('./commands/admin');
-const { help, buildCategoryEmbed } = require('./commands/helpCmd');
+const { helpSlash, buildCategoryEmbed } = require('./commands/helpCmd');
 const { guildEmbedColor } = require('./lib/embedUtil');
+const admin = require('./commands/admin');
+const { createSlashProxy } = require('./lib/slashProxy');
+const dispatchCore = require('./dispatchCore');
+const { registerSlashCommands } = require('./slash/register');
+const { AUTOCOMPLETE_VALUES } = require('./data/autocompleteList');
 
 function validate() {
   const m = [];
@@ -31,8 +33,17 @@ const client = new Client({
 client.snipes = new Map();
 client.helpAuthors = new Map();
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   console.log(`Sayuri Gestion prêt : ${c.user.tag}`);
+  if (config.registerSlash) {
+    try {
+      await registerSlashCommands();
+    } catch (e) {
+      console.error('[slash]', e.message);
+    }
+  } else {
+    console.log('[slash] REGISTER_SLASH_COMMANDS=false — pas d’enregistrement.');
+  }
 });
 
 client.on(Events.MessageDelete, async (msg) => {
@@ -47,20 +58,88 @@ client.on(Events.MessageDelete, async (msg) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isStringSelectMenu() || interaction.customId !== 'help_tab') return;
-  const owner = client.helpAuthors.get(interaction.message.id);
-  if (owner && interaction.user.id !== owner) {
-    return interaction.reply({ content: 'Ce menu d’aide ne t’est pas destiné.', ephemeral: true });
+  if (interaction.isStringSelectMenu() && interaction.customId === 'help_tab') {
+    const owner = client.helpAuthors.get(interaction.message.id);
+    if (owner && interaction.user.id !== owner) {
+      return interaction.reply({ content: 'Ce menu d’aide ne t’est pas destiné.', ephemeral: true });
+    }
+    const catId = interaction.values[0];
+    const color = await guildEmbedColor(interaction.guild.id);
+    try {
+      await interaction.update({
+        embeds: [buildCategoryEmbed(catId, color)],
+        components: [admin.helpMainComponents()],
+      });
+    } catch (e) {
+      console.error(e);
+    }
+    return;
   }
-  const catId = interaction.values[0];
-  const color = await guildEmbedColor(interaction.guild.id);
-  try {
-    await interaction.update({
-      embeds: [buildCategoryEmbed(catId, color)],
-      components: [admin.helpMainComponents()],
-    });
-  } catch (e) {
-    console.error(e);
+
+  if (interaction.isAutocomplete()) {
+    if (interaction.commandName !== 'run') return;
+    const focused = interaction.options.getFocused(true);
+    if (focused.name !== 'commande') return;
+    const q = (focused.value || '').toLowerCase();
+    let matches = AUTOCOMPLETE_VALUES.filter((v) => v.toLowerCase().includes(q));
+    if (!matches.length) matches = AUTOCOMPLETE_VALUES.slice(0, 25);
+    else matches = matches.slice(0, 25);
+    await interaction.respond(
+      matches.map((name) => ({
+        name: name.length > 100 ? `${name.slice(0, 97)}…` : name,
+        value: name.slice(0, 100),
+      }))
+    );
+    return;
+  }
+
+  if (!interaction.isChatInputCommand() || !interaction.inGuild()) return;
+
+  if (interaction.commandName === 'help') {
+    try {
+      await helpSlash(interaction, client);
+    } catch (e) {
+      console.error(e);
+      if (!interaction.replied) await interaction.reply({ content: 'Erreur /help', ephemeral: true });
+    }
+    return;
+  }
+
+  if (interaction.commandName === 'run') {
+    const cmd = interaction.options.getString('commande', true);
+    const rest = interaction.options.getString('arguments') || '';
+    const line = `${cmd}${rest ? ` ${rest}` : ''}`.trim();
+    const parsed = parseCommandLine(line);
+    if (!parsed?.key) {
+      return interaction.reply({ content: 'Ligne vide.', ephemeral: true });
+    }
+    const key = parsed.key;
+    const meta = COMMAND_META[key];
+
+    if (meta?.ownerOnly && !isOwner(interaction.user.id)) {
+      return interaction.reply({
+        content: 'Réservé au **propriétaire du bot** (`BOT_OWNER_IDS`).',
+        ephemeral: true,
+      });
+    }
+
+    if (!(await canRunCommand(interaction.member, interaction.guild, key, meta))) {
+      return interaction.reply({
+        content:
+          '**Permission refusée.** Admin Discord, **botadmin**, **owner**, ou commande **+publiccmd**.',
+        ephemeral: true,
+      });
+    }
+
+    const proxy = createSlashProxy(interaction);
+    try {
+      await dispatchCore(proxy, client, key, parsed);
+    } catch (e) {
+      console.error(e);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: `Erreur : ${e.message}`, ephemeral: true }).catch(() => null);
+      }
+    }
   }
 });
 
@@ -74,12 +153,7 @@ client.on(Events.MessageCreate, async (message) => {
   const key = parsed.key;
   const meta = COMMAND_META[key];
 
-  if (!meta) {
-    await message.reply('Commande inconnue. Utilise `+help`.').catch(() => null);
-    return;
-  }
-
-  if (meta.ownerOnly && !isOwner(message.author.id)) {
+  if (meta?.ownerOnly && !isOwner(message.author.id)) {
     await message.reply('Réservé au **propriétaire du bot** (`BOT_OWNER_IDS`).').catch(() => null);
     return;
   }
@@ -95,98 +169,12 @@ client.on(Events.MessageCreate, async (message) => {
   }
 
   try {
-    await dispatch(message, client, key, parsed);
+    await dispatchCore(message, client, key, parsed);
   } catch (e) {
     console.error(e);
     await message.reply(`Erreur : ${e.message}`).catch(() => null);
   }
 });
-
-async function dispatch(message, client, key, parsed) {
-  const { sub, args, text } = parsed;
-
-  switch (key) {
-    case 'help':
-      return help(message, client);
-    case 'changelogs':
-      return util.changelogs(message);
-    case 'allbots':
-      return util.allbots(message);
-    case 'alladmins':
-      return util.alladmins(message);
-    case 'botadmins':
-      return util.botadmins(message);
-    case 'boosters':
-      return util.boosters(message);
-    case 'rolemembers':
-      return util.rolemembers(message, args);
-    case 'serverinfo':
-      return util.serverinfo(message);
-    case 'vocinfo':
-      return util.vocinfo(message);
-    case 'role':
-      return util.role(message, args);
-    case 'channel':
-      return util.channel(message, args);
-    case 'user':
-      return util.user(message, args);
-    case 'member':
-      return util.member(message, args);
-    case 'pic':
-      return util.pic(message, args);
-    case 'banner':
-      return util.banner(message, args);
-    case 'server':
-      return util.serverAsset(message, sub);
-    case 'snipe':
-      return util.snipe(message, client);
-    case 'emoji':
-      return util.emoji(message, args);
-    case 'calc':
-      return util.calc(message, args);
-    case 'wiki':
-      return util.wiki(message, args.join(' '));
-    case 'searchwiki':
-      return util.searchwiki(message, text);
-    case 'crowbots':
-      return util.crowbots(message);
-
-    case 'botadmin':
-      return admin.botadmin(message, args);
-    case 'publiccmd':
-      return admin.publiccmd(message, args);
-    case 'settings':
-      return admin.settings(message);
-    case 'theme':
-      return admin.theme(message, args);
-
-    case 'clear':
-      return mod.clear(message, args);
-    case 'kick':
-      return mod.kick(message, args);
-    case 'ban':
-      return mod.ban(message, args);
-    case 'unban':
-      return mod.unban(message, args);
-    case 'timeout':
-      return mod.timeout(message, args);
-    case 'warn':
-      return mod.warn(message, args);
-    case 'sanctions':
-      return mod.sanctions(message, args);
-    case 'lock':
-      return mod.lock(message, args);
-    case 'unlock':
-      return mod.unlock(message, args);
-    case 'addrole':
-      return mod.addrole(message, args);
-    case 'delrole':
-      return mod.delrole(message, args);
-
-    default:
-      return message.reply('Commande listée mais pas encore branchée.');
-  }
-}
 
 async function main() {
   validate();

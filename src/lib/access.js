@@ -37,9 +37,7 @@ async function canRunCommand(member, guild, commandKey, meta) {
 
   const gc = await GuildConfig.findOne({ guildId: guild.id }).lean();
   const pub = gc?.publicCommands || [];
-  if (pub.includes(commandKey)) {
-    if (meta?.allowPublic) return true;
-  }
+  if (meta?.allowPublic && pub.includes(commandKey)) return true;
   return false;
 }
 
